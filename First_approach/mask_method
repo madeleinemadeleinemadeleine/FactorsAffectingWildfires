@@ -1,0 +1,326 @@
+// This is a Google Earth-Engine code snippet. Please paste it into the GEE code editor
+// Or follow this link : https://code.earthengine.google.com/?scriptPath=users%2Fmadeleinesarahabbes%2FGeoInfProject%3Afirst_approach
+
+////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
+
+
+//////////////////////////////// User-tunable parameters ///////////////////////////////////
+
+var num_points = 200 ; // integer 
+var myDriveFolder = 'folder_name' ; // string 
+var scale = 50000 ; // integer. minimum : 500m
+
+var startDate = ee.Date('2010-01-01'); // ee.Date. Minimum : min : 2013-03-18 ; max : today
+var endDate = ee.Date('2023-09-01');   // ee.Date. Minimum : min : 2013-03-18 ; max : today
+
+////////////////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////// Import dataset to extract the factors ///////////////////////
+var climateVar = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE");
+var    dem = ee.Image("USGS/SRTMGL1_003");
+var    human_impact_index = ee.ImageCollection("projects/HII/v1/hii");
+var    infrastructure = ee.ImageCollection("projects/HII/v1/driver/infrastructure");
+var    population_density = ee.ImageCollection("projects/HII/v1/driver/population_density");
+var    ls8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_TOA");
+var    modis = ee.ImageCollection("MODIS/061/MCD64A1");
+var    hansen = ee.Image("UMD/hansen/global_forest_change_2022_v1_10");
+var    Africa = ee.FeatureCollection("projects/ee-geoinfproj/assets/Geoinf/Africa");
+var    NorthAmerica = ee.FeatureCollection("projects/ee-geoinfproj/assets/Geoinf/NorthAmerica");
+var    SouthAmerica = ee.FeatureCollection("projects/ee-geoinfproj/assets/Geoinf/SouthAmerica");
+var    Asia = ee.FeatureCollection("projects/ee-geoinfproj/assets/Geoinf/Asia");
+var    Australia = ee.FeatureCollection("projects/ee-geoinfproj/assets/Geoinf/Australia");
+var    Europe = ee.FeatureCollection("projects/ee-geoinfproj/assets/Geoinf/Europe");
+var    Oceania = ee.FeatureCollection("projects/ee-geoinfproj/assets/Geoinf/Oceania");
+
+
+//////////// Create the burn mask /////////
+
+var MaskLand = hansen.select('datamask') ;
+var burnmask = modis
+                    .filterDate(startDate,endDate)
+                    .select(['BurnDate'], ['Burn'])
+                    .sum()
+                    .gte(1)
+                    .unmask(0)
+                    .updateMask(MaskLand.eq(1))
+                    .reproject({crs : 'EPSG:4326', scale : scale});
+
+Export.image.toAsset({
+  image : burnmask, 
+  description : 'myBurnMask_toassets', 
+  assetId : 'projects/ee-madeleinesarahabbes/assets/GeoInfProj/modis_burnMask01_scale:-SCALE-m', 
+  scale : scale, 
+  crs : 'EPSG:4326',
+  })
+  
+Map.addLayer(burnmask, {min:0, max:1, palette : ['black', 'white']});
+
+
+//////////////////////////* Extracting Topographic Variables*///////////////////////////
+//Slope
+var slope = ee.Terrain.slope(dem) ;
+//Aspect
+var aspect = ee.Terrain.aspect(dem);
+
+//////////////////////////* Aggregating CLIMATE VARIABLES*///////////////////////////
+//Wind speed
+var windSpeed = climateVar.select('vs')
+  .filterDate(startDate,endDate)
+  .median() ; //.mean()
+//Max temperature
+var tempMax = climateVar.select('tmmx')
+  .filterDate(startDate,endDate)
+  .median() ;//.mean()
+//Min temperature
+var tempMin = climateVar.select('tmmn')
+  .filterDate(startDate,endDate)
+  .median() ;//.mean()
+//Water deficit
+var waterDeficit = climateVar.select('def')
+  .filterDate(startDate,endDate)
+  .median() ;//.mean()
+//Precipitation
+var precipitation = climateVar.select('pr')
+  .filterDate(startDate,endDate)
+  .median() ;//.mean()
+//Soil Moisture
+var soilMoist = climateVar.select('soil')
+  .filterDate(startDate,endDate)
+  .median() ;//.mean()
+////////////////////////////Removing Cloud Cover and Shadows from Landsat Images//////////////////////
+function maskL8clouds(image) {
+  var qa = image.select('QA_PIXEL'); // Selecting the QA band from the Landsat 8 image.
+  var cloudBitMask = 1 << 4; //Defining a bitmask to isolate the cloud bit in the QA band.
+  var shadowBitMask = 1 << 3;//Defining a bitmask to isolate the shadow bit in the QA band.
+  //Creating a binary mask where pixels with cloud or shadow are set to 0.
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0).and(
+             qa.bitwiseAnd(shadowBitMask).eq(0)); 
+  return image.updateMask(mask)
+      .select('B.*') 
+      .copyProperties(image, ['system:time_start']);
+  }
+// Loading Landsat 8 image collection  
+var landsat8 = ls8.filterDate(startDate, endDate)//filtering by date range
+                  .map(maskL8clouds)//applying the cloud and shadow mask to each image
+                  .median();//computing the median 
+//Computing NDVI
+var NDVI = landsat8.normalizedDifference(['B5', 'B4']);
+//Map.addLayer(NDVI, {}, 'NDVI',0);
+    
+//Computing NDMI
+var NDMI = landsat8.normalizedDifference(['B5', 'B6']);
+//Map.addLayer(NDMI ,{}, 'NDMI',0);
+
+////////////////////////////LAND COVER LAYER//////////////////////
+//Add the land cover dataset from MCD12Q1
+var mcd12q1 = ee.ImageCollection('MODIS/061/MCD12Q1')
+                  .filter(ee.Filter.date('2010-01-01', '2023-09-01'))
+                  .first();
+var landCoverBand = mcd12q1.select('LC_Type1');
+// Reprojecting the "LandCover" band to match the CRS of the other bands
+var landCoverReprojected = landCoverBand.reproject({crs: 'EPSG:4326'});
+/////////////////////Human impact layer//////////////////////
+
+var humanImpactIndexMean = human_impact_index.mean();
+
+// Creating an image with all the predictor variables as bands.
+var predictorImage = ee.Image([
+  slope.rename('slope'), 
+  aspect.rename('aspect'),
+  windSpeed.rename('wind_speed'),
+  tempMax.rename('temp_max'),
+  tempMin.rename('temp_min'),
+  waterDeficit.rename('water_deficit'),
+  precipitation.rename('precipitation'),
+  soilMoist.rename('soil_moist'),
+  NDVI.rename('NDVI'),
+  NDMI.rename('NDMI'),
+  landCoverReprojected.rename('LandCover'),
+  humanImpactIndexMean.rename('HumanImpactIndexMean'),
+  burnmask.select(['Burn'])
+  ]);
+
+//////////////////////// Sampling and downloading the points ///////////////////
+
+var Asia_PointCloud = predictorImage.stratifiedSample({
+  numPoints : num_points, 
+  classBand : 'Burn',
+  region : Asia, 
+  scale : scale,
+  projection : 'EPSG:4326', 
+  seed : 0,
+  tileScale : 16,
+  geometries : true
+  });
+Map.addLayer(Asia_PointCloud,{}, 'Asia sampled points', 1)
+Export.table.toDrive({
+  collection : Asia_PointCloud, 
+  description : 'Asia_sampled_point_todrive', 
+  folder : myDriveFolder,
+  fileFormat : 'csv', 
+})
+
+var Africa_PointCloud = predictorImage.stratifiedSample({
+  numPoints : num_points, 
+  classBand : 'Burn',
+  region : Africa, 
+  scale : scale,
+  projection : 'EPSG:4326', 
+  seed : 0,
+  tileScale : 16,
+  geometries : true
+  }) ;
+Map.addLayer(Africa_PointCloud,{}, 'Africa sampled points', 1) ;
+Export.table.toDrive({
+  collection : Africa_PointCloud, 
+  description : 'Africa_sampled_point_todrive', 
+  folder : myDriveFolder,
+  fileFormat : 'csv', 
+})
+
+var Europe_PointCloud = predictorImage.stratifiedSample({
+  numPoints : num_points, 
+  classBand : 'Burn',
+  region : Europe, 
+  scale : scale,
+  projection : 'EPSG:4326', 
+  seed : 0,
+  tileScale : 16,
+  geometries : true
+  });
+Map.addLayer(Europe_PointCloud,{}, 'Europe sampled points', 1)
+Export.table.toDrive({
+  collection : Europe_PointCloud, 
+  description : 'Europe_sampled_point_todrive', 
+  folder : myDriveFolder,
+  fileFormat : 'csv', 
+})
+
+var NorthAmerica_PointCloud = predictorImage.stratifiedSample({
+  numPoints : num_points, 
+  classBand : 'Burn',
+  region : NorthAmerica, 
+  scale : scale,
+  projection : 'EPSG:4326', 
+  seed : 0,
+  tileScale : 16,
+  geometries : true
+  });
+Map.addLayer(NorthAmerica_PointCloud,{}, 'North America sampled points', 1)
+Export.table.toDrive({
+  collection : NorthAmerica_PointCloud, 
+  description : 'NorthAmerica_sampled_point_todrive', 
+  folder : myDriveFolder,
+  fileFormat : 'csv', 
+})
+
+var SouthAmerica_PointCloud = predictorImage.stratifiedSample({
+  numPoints : num_points, 
+  classBand : 'Burn',
+  region : SouthAmerica, 
+  scale : scale,
+  projection : 'EPSG:4326', 
+  seed : 0,
+  tileScale : 16,
+  geometries : true
+  });
+Map.addLayer(SouthAmerica_PointCloud,{}, 'South America sampled points', 1)
+Export.table.toDrive({
+  collection : SouthAmerica_PointCloud, 
+  description : 'SouthAmerica_sampled_point_todrive', 
+  folder : myDriveFolder,
+  fileFormat : 'csv', 
+})
+
+var Oceania_PointCloud = predictorImage.stratifiedSample({
+  numPoints : num_points/2, 
+  classBand : 'Burn',
+  region : Oceania, 
+  scale : scale,
+  projection : 'EPSG:4326', 
+  seed : 0,
+  tileScale : 16,
+  geometries : true
+  });
+Map.addLayer(Oceania_PointCloud,{}, 'Oceania sampled points', 1)
+Export.table.toDrive({
+  collection : Oceania_PointCloud, 
+  description : 'Oceania_sampled_point_todrive', 
+  folder : myDriveFolder,
+  fileFormat : 'csv', 
+})
+
+var Australia_PointCloud = predictorImage.stratifiedSample({
+  numPoints : num_points, 
+  classBand : 'Burn',
+  region : Australia, 
+  scale : scale,
+  projection : 'EPSG:4326', 
+  seed : 0,
+  tileScale : 16,
+  geometries : true
+  });
+Map.addLayer(Australia_PointCloud,{}, 'Australia sampled points', 1)
+Export.table.toDrive({
+  collection : Australia_PointCloud, 
+  description : 'Australia_sampled_point_todrive', 
+  folder : myDriveFolder,
+  fileFormat : 'csv', 
+})
+
+// Merge the tables
+var mergedTable = Africa_PointCloud.merge(Europe_PointCloud).merge(Australia_PointCloud).merge(NorthAmerica_PointCloud).merge(Oceania_PointCloud).merge(SouthAmerica_PointCloud).merge(Asia_PointCloud);
+
+// Export the merged table to Google Drive
+Export.table.toAsset({
+  collection: mergedTable,
+  description: 'Entire_World_sampled_points_toAssets',
+});
+Export.table.toDrive({
+  collection: mergedTable,
+  description: 'Entire_World_sampled_points_toDrive',
+  folder : myDriveFolder,
+  fileFormat: 'csv'
+});
+
+
+
+//////////////////////////// widget //////////////////////////
+    /// Create a ui.Select for continent selection
+    var continentSelect = ui.Select({
+      items: ['Africa', 'Europe', 'NorthAmerica', 'Oceania', 'SouthAmerica', 'Australia', 'Asia'],
+      onChange: function(selectedContinent) {
+        // Update the map based on the selected continent
+        var selectedRegion = ee.FeatureCollection("projects/ee-geoinfproj/assets/Geoinf/" + selectedContinent);
+        Map.centerObject(selectedRegion, 3);
+    
+        // Remove the previous region layer (if any)
+        Map.layers().forEach(function(layer) {
+          if (layer.getName() === 'SelectedRegion') {
+            Map.layers().remove(layer);
+          }
+          
+        });
+    
+        // Add the selected region as a new layer
+        Map.addLayer(selectedRegion, {color: 'FF0000'}, 'SelectedRegion');
+      },
+       style: {
+        position: 'top-left', // Position the dropdown at the bottom left of the map
+        margin: '10px' // Add margin if needed
+        // You can add more style properties here if necessary
+      }
+    });
+    
+    // Set a placeholder.
+    continentSelect.setPlaceholder('Choose a continent to view');
+    
+    // Add the continentSelect to the Map or any other desired location
+    Map.add(continentSelect);
+
+
