@@ -8,7 +8,7 @@ Our work sets the scene and material for further analysis of these factors, whil
 Keywords : *Google Earth-Engine*, *Remote Sensing*, *wildfires global distribution*
 
 ## First approach 
-see **first approach**  folder for the raw codes and information on how to use them
+see **first approach**  folder for the raw codes and information on how to use them \\
 GEE code link : 
 https://code.earthengine.google.com/?scriptPath=users%2Fmadeleinesarahabbes%2FGeoInfProject%3Afirst_approach
 
