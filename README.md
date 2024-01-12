@@ -1,5 +1,5 @@
 # FactorsAffectingWildfires
-A global scale study of the factors affecting wildfires' distribution over the past 10 years.
+A global scale study of the factors affecting wildfires' distribution over the past 10 years. We used Google Earth Engine for retrieving data and Python to analyse it.
 
 This project is the premise of a larger study, aiming at understanding what are the factors affecting wildfire distribution around the globe.
 We propose two different methods to extract information on wildfires from multispectral satellite imagery, in order to study what are the factors that are affecting wildfires' distribution at a global scale. An image containing all the factors will be created using Google Earth-Engine, and we will randomly extract points from both the burnt and unburnt areas, to analyze them through machine learning classification tools (Random Forest, Adaptative Boosting, dimension reduction analysis,etc.).
