@@ -27,7 +27,7 @@ https://code.earthengine.google.com/?scriptPath=users%2Fmadeleinesarahabbes%2FGe
 https://code.earthengine.google.com/?scriptPath=users%2Fmadeleinesarahabbes%2FGeoInfProject%3AHexagon_method_unburned_pixels
 
 ## Data analysis
-see the **notebook** folder in this repo
+Check the **notebook** folder in this repository.
 
 ## Results
-see **technical report** in this repo
+Read the fourth chapter of **Technical report** in this repository.
