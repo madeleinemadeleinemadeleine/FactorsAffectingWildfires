@@ -30,4 +30,4 @@ https://code.earthengine.google.com/?scriptPath=users%2Fmadeleinesarahabbes%2FGe
 Check the **notebook** folder in this repository.
 
 ## Results
-Read the fourth chapter of **Technical report** in this repository.
+Read the fourth chapter of **Project Technical Report** in this repository.
